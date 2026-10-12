@@ -1,0 +1,43 @@
+# ── 构建产物（make 可随时重新生成，不入库）─────────────────────────
+*.o
+*.ko
+*.mod
+*.mod.c
+*.order
+*.symvers
+.*.cmd
+..*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+
+# 各 lab 编译出的可执行文件（与源码同名、无扩展名）
+labs/01-socket-api-basics/tcp_echo_server
+labs/01-socket-api-basics/tcp_client
+labs/01-socket-api-basics/udp_echo
+labs/01-socket-api-basics/sockopt_probe
+labs/02-tcp-state-machine/backlog_probe
+labs/02-tcp-state-machine/timewait_demo
+labs/03-netlink-rtnetlink/rtnl_dump
+labs/04-raw-socket-arp/arp_sniff
+labs/04-raw-socket-arp/arp_who_has
+labs/04-raw-socket-arp/arp_gratuitous
+labs/04-raw-socket-arp/raw_send_udp
+labs/05-tun-tap-userspace-stack/tun_stack
+labs/06-kernel-module-netfilter/netlab.ko
+labs/07-http-parser/test_parser
+labs/07-http-parser/http_server
+labs/08-ebpf-xdp/bpf_socket_filter
+labs/08-ebpf-xdp/xdp_drop
+labs/08-ebpf-xdp/xdp_drop.bpf.o
+
+# ── Python 缓存 ────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+
+# ── 编辑器 / 系统杂物 ──────────────────────────────────────────────
+*.swp
+*~
+.DS_Store
+
+# 说明：labs/*/.out/*.log 是**真实运行日志**，属于教程证据，故意入库。
