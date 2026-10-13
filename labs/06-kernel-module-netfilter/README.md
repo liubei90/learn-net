@@ -182,7 +182,10 @@ modinfo       : /sbin/modinfo
 insmod        : /sbin/insmod
 unprivileged_bpf_disabled : 2
 
-结论: 可以编译 (make all)，但不能 insmod/rmmod —— 需要 root。
+结论: 可以编译 (make all)，但不能 insmod/rmmod。
+      注意：**这不只是权限问题** —— 本机 UEFI Secure Boot 生效、运行时
+      `sig_enforce=Y`，未签名模块连 root 都加载不了（`Key was rejected by service`），
+      详见 8.4 / 8.5。
 ```
 
 > 注意 `PATH` 里没有 `/sbin`，所以 `modinfo` / `insmod` / `rmmod`
@@ -318,7 +321,7 @@ vermagic 里的 `6.12.107+deb13-amd64` 与 `uname -r` **完全一致**，
 
 ---
 
-## 5. root 下的完整实验步骤（本机无法执行，附原因）
+## 5. 真正加载的完整步骤（需 root，且机器允许未签名模块）
 
 > **本机限制（实测）**：`uid=1000`、`CapEff=0000000000000000`（无任何 capability）、
 > `no_new_privs` 已设置，因此 `sudo` 也无法提权：
@@ -328,7 +331,15 @@ vermagic 里的 `6.12.107+deb13-amd64` 与 `uname -r` **完全一致**，
 > sudo: 已设置“no new privs”标志，它阻止 sudo 以 root 身份运行。
 > ```
 >
-> 所以 `insmod` / `rmmod` 在本机跑不了。下面给出在**有 root 的机器**上的完整步骤。
+> 所以 `insmod` / `rmmod` 在本机跑不了。
+>
+> **但拿到 root 也不够（这是 2026-10-13 的新实测结论）**：用特权容器
+> （真 root、`CapEff=000001ffffffffff`）加载仍然失败，报
+> `insmod: ERROR: could not insert module netlab.ko: Key was rejected by service`
+> —— 本机 Secure Boot 生效、运行时 `sig_enforce=Y`，**未签名模块一律被拒**。
+> 详见 8.4（证据）与 8.5（用 MOK 签名的正规解法）。
+>
+> 下面给出在**有 root、且允许未签名模块（或已按 8.5 签名）的机器**上的完整步骤。
 > 其中标注 **[预期]** 的输出是按代码逻辑推导的形态，不是本机实测。
 
 ### 5.1 加载
@@ -693,10 +704,82 @@ A：它是 `/sys/module/netlab/parameters/x` 这个 sysfs 文件的权限位。
 | `no_new_privs` | 已设置（`sudo` 也无法提权） | ✗ |
 | 内核头文件 | `/lib/modules/6.12.107+deb13-amd64/build` 存在 | ✓ |
 | gcc / make | 14.2.0 / 4.4.1 | ✓ |
-| vermagic 匹配 | 与 `uname -r` 完全一致 | ✓（一旦有 root 就能加载） |
+| vermagic 匹配 | 与 `uname -r` 完全一致 | ✓ 编译无障碍 |
+| **Secure Boot** | **`SecureBoot=1`、`SetupMode=0`** | **✗ 根本障碍：未签名模块被拒** |
+| **运行时 `sig_enforce`** | `/sys/module/module/parameters/sig_enforce` = **`Y`** | **✗ 直接原因** |
+| **lockdown** | `none [integrity] confidentiality` | **✗ lockdown=integrity 生效** |
 
 **能做的：编译、`modinfo`、符号分析、vermagic 校验。**
-**不能做的：`insmod` / 读 `/proc/netlab_stats` / `rmmod` / `dmesg`。**
+**不能做的：`insmod` / 读 `/proc/netlab_stats` / `rmmod` / `dmesg`**（`dmesg_restrict=1`）。
+
+#### 8.4.1 实测过程与证据（2026-10-13）
+
+用 `docker run --privileged`（真 root、`CapEff=000001ffffffffff`，并把宿主的
+`/lib/modules`、`/usr/src`、`kmod` 挂进去）尝试加载，内核**直接拒绝**：
+
+```console
+$ /bin/insmod /repo/labs/06-kernel-module-netfilter/netlab.ko
+insmod: ERROR: could not insert module /repo/.../netlab.ko: Key was rejected by service
+```
+
+`Key was rejected by service` 就是 `EKEYREJECTED`，来自模块签名校验。根因链：
+
+| 检查项 | 本机实测值 | 说明 |
+| --- | --- | --- |
+| `SecureBoot` EFI 变量 | `1`（`SetupMode=0`） | UEFI Secure Boot 已开启 |
+| `CONFIG_LOCK_DOWN_IN_EFI_SECURE_BOOT` | `y` | Secure Boot → 自动进 lockdown |
+| `/sys/kernel/security/lockdown` | `none [integrity] confidentiality` | 当前为 integrity |
+| `/sys/module/module/parameters/sig_enforce` | **`Y`** | **运行时签名强制已开** |
+| `CONFIG_MODULE_SIG_FORCE` | `# ... is not set` | 配置层面没强制，是 Secure Boot 触发的 |
+| `CONFIG_MODULE_SIG` / `_SHA256` | `y` / `y` | 内核支持模块签名 |
+| `modinfo netlab.ko` 的 `signer` / `sig_id` | 无 | 本地编出的模块**未签名** |
+
+**结论：能不能加载模块，要过三道门 —— 权限（capability）→ 模块格式
+（vermagic / 符号版本）→ 签名（Secure Boot / lockdown）。本机卡在第三道。**
+三道门的报错各不相同（`Operation not permitted` / `Invalid module format` /
+`Key was rejected by service`），会读报错就知道卡在哪一道。
+
+### 8.5 如果一定要在本机真正加载：用 MOK 给模块签名
+
+本机三件工具齐全（实测）：内核自带的 `scripts/sign-file`、`openssl`、`mokutil`。
+正规做法是用一张 **MOK（Machine Owner Key）** 签名，并把公钥登记进固件——
+**不需要关闭 Secure Boot**。本目录下的 [`mok-sign.sh`](mok-sign.sh) 已把第 1~2 步
+自动化（实测可用：签名后 `modinfo` 会多出 `sig_id: PKCS#7` / `signer: learn-net module signing`）：
+
+```bash
+bash mok-sign.sh        # 只生成密钥 + 签名；故意不碰 mokutil/固件
+```
+
+手动步骤等价于：
+
+```bash
+# 1) 生成签名密钥对（放哪都行，这里放 ~/mok）
+mkdir -p ~/mok && cd ~/mok
+openssl req -new -x509 -newkey rsa:2048 -keyout MOK.key -out MOK.crt \
+        -nodes -days 3650 -subj "/CN=learn-net module signing/"
+openssl x509 -in MOK.crt -out MOK.cer -outform DER
+
+# 2) 用内核自带的 sign-file 给模块附签名（sha256）
+K=/usr/src/linux-headers-$(uname -r)
+$K/scripts/sign-file sha256 MOK.key MOK.crt \
+    ~/code/learn-net/labs/06-kernel-module-netfilter/netlab.ko
+modinfo ~/code/learn-net/labs/06-kernel-module-netfilter/netlab.ko | grep -iE 'signer|sig_id'
+
+# 3) 登记公钥（会要求设一个一次性密码），然后**重启**，在开机 MOK Manager 界面确认
+sudo mokutil --import MOK.cer
+
+# 4) 重启之后
+sudo insmod ~/code/learn-net/labs/06-kernel-module-netfilter/netlab.ko
+cat /proc/netlab_stats        # 到这一步才是真正跑起来
+```
+
+三条替代路径的取舍：
+
+| 方案 | 代价 |
+| --- | --- |
+| MOK 签名（上面这套） | 重启一次 + 进固件界面确认；此后**任何用该密钥签名的模块**都能加载 |
+| 关闭 Secure Boot | 整机安全性下降，不建议 |
+| 换没有 Secure Boot 的机器 / QEMU 虚拟机 | 最安全，也正是 8.3 节推荐的「首次 `insmod` 别在主力机」 |
 
 ---
 

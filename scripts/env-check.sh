@@ -478,7 +478,7 @@ LABS="01|socket API 基础 (C 语言)|✅|纯用户态 socket 编程，非特权
 03|NETLINK_ROUTE / rtnetlink|✅|读取链路/地址信息非特权即可（只有写操作才需要 root）
 04|原始套接字与 ARP|✅|纯 AF_PACKET 需要 CAP_NET_RAW；本机初始命名空间没有，但在 unshare -Urn 内可获得，实测真跑通过
 05|TUN/TAP 用户态协议栈|⚠️|需要 root + /dev/net/tun；本机 /dev/net/tun 不存在
-06|内核模块与 netfilter|⚠️|本机有头文件**可编译**模块，但非特权无法 insmod 加载
+06|内核模块与 netfilter|⚠️|可编译出 .ko；但本机 Secure Boot 生效（运行时 sig_enforce=Y），未签名模块**连 root 也拒载**，需 MOK 签名
 07|HTTP 解析器|✅|纯用户态字符串/协议解析，非特权即可
 08|eBPF / XDP|⚠️|需要 CAP_BPF + clang + libbpf + 可写 tracefs；本机全部缺失
 09|内核网络观测与调优|✅|已针对本机权限设计：labs/09 的 01~05、07 全部真跑通过

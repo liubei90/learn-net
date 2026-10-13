@@ -156,6 +156,86 @@ grep -A3 ethertype=0x0806 /tmp/sniff.log
 
 ---
 
+### 2.3 另一种做法：在容器里以真 root 复现（2026-10-13 补测，实测通过）
+
+2.2 那套 `unshare -Urn` + 两个 `unshare -n` 进程，是为了绕开本机
+「`CapEff=0`」与「`/run/netns` 只读」两个限制。如果本机有 Docker，
+还有一条更省事、也更接近生产路径的做法：**在特权容器里用真 root 跑**。
+本目录下的 [`run-in-container.sh`](run-in-container.sh) 已经把整套流程自动化
+（实测 `exit=0`，输出与本节完全一致）：
+
+```bash
+bash run-in-container.sh          # 需要 docker；会复用宿主的 ip / nc
+```
+
+其核心等价于下面这条命令（想看细节就照这个读）：
+
+```bash
+docker run --rm --privileged \
+  -v "$PWD/../..":/repo:ro \
+  -v /usr/bin/ip:/usr/bin/ip:ro -v /usr/bin/nc:/usr/bin/nc:ro \
+  -v /usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:ro \
+  debian:trixie sh -c '
+    ip netns add ns1; ip netns add ns2               # 容器 /run 可写，不用再绕
+    ip link add veth0 type veth peer name veth1
+    ip link set veth1 netns ns2
+    ip addr add 10.9.9.1/24 dev veth0; ip link set veth0 up; ip link set lo up
+    ip netns exec ns2 ip addr add 10.9.9.2/24 dev veth1
+    ip netns exec ns2 ip link set veth1 up; ip netns exec ns2 ip link set lo up
+    ip netns exec ns2 /repo/labs/04-raw-socket-arp/arp_sniff veth1 2 >/tmp/s &
+    sleep 1
+    /repo/labs/04-raw-socket-arp/arp_who_has veth0 10.9.9.2
+  '
+```
+
+容器内 `uid=0`、`CapEff=000001ffffffffff`（而宿主沙箱里是 `0`）。实测输出：
+
+```console
+# ① ARP 一问一答
+[*] 发送 ARP 请求: who-has 10.9.9.2 tell 10.9.9.1 (广播)
+[+] 收到 ARP 应答！
+    ARP: htype=1 ptype=0x0800 hlen=6 plen=4 oper=2(REPLY)
+         sender: mac=f2:d8:e1:bb:19:8d ip=10.9.9.2
+         target: mac=d2:be:48:2c:e9:b5 ip=10.9.9.1
+
+# ② 对端抓到的原始帧（前面 2 个 IPv6 帧是加地址时内核自己发的）
+[帧] len=42   ... -> ff:ff:ff:ff:ff:ff ethertype=0x0806
+    ARP: ... oper=1(REQUEST)  sender: 10.9.9.1  target: 10.9.9.2
+[帧] len=42   ... -> d2:be:48:2c:e9:b5 ethertype=0x0806
+    ARP: ... oper=2(REPLY)    sender: 10.9.9.2  target: 10.9.9.1
+
+# ③ 邻居表 —— 「AF_PACKET 绕过邻居子系统」的直接证据
+ns1 邻居表: 0 条   ← 应答被**应用自己**收走了，内核 ARP 状态机没参与
+ns2 邻居表: 1 条   ← 10.9.9.1 dev veth1 lladdr d2:be:48:2c:e9:b5 STALE
+
+# ④ 免费 ARP：sender IP == target IP，这正是 gratuitous ARP 的特征
+[帧] len=42   ... -> ff:ff:ff:ff:ff:ff ethertype=0x0806
+    ARP: ... oper=1(REQUEST)  sender: 10.9.9.99  target: 10.9.9.99
+
+# ⑤ 手写原始 IP/UDP 报文 → ns2 用 nc 收（校验和错的话内核不会交给 socket）
+[*] IPv4 首部 20 字节，校验和 = 0x8115
+[*] 目标 10.9.9.2:9999，UDP 长度 26，IP 总长 46
+[*] 已发送 46 字节
+    --- ns2 的 nc 收到 ---
+    hello-from-raw-udp
+    --- ns2 Udp InDatagrams: 0 -> 1 ---
+```
+
+两条路径的对比：
+
+| | `unshare -Urn`（2.2，待在宿主沙箱内） | 特权容器（2.3） |
+| --- | --- | --- |
+| 身份 | userns 内映射的 uid 0 | **真 uid 0** |
+| `CapEff` | `000001ffffffffff`（userns 内） | `000001ffffffffff` |
+| `/run/netns` | 只读 → 只能用两个 `unshare -n` 进程 | 可写 → 直接 `ip netns add` |
+| lab 二进制 | 宿主编译 | 同一份（挂载进容器，glibc 同版本） |
+| 适用 | 没有 Docker / 想待在本机沙箱内 | 有 Docker、想更接近生产的 root 环境 |
+
+> **边界**：容器用的是**宿主内核**（`uname -r` 仍是宿主的值），所以这条路径
+> 解决的是「权限」问题，**不解决**需要内核模块 / 模块签名的 lab06 那种问题。
+
+---
+
 ## 3. 实测输出（真实捕获）
 
 ### 3.1 发送 ARP 请求并收到应答（ns A 视角）

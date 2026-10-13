@@ -35,7 +35,8 @@ cd labs/09-observability && make run
 # 第二站：亲手写一个 HTTP/1.1 解析器（无需 root，2.7 万断言）
 cd ../07-http-parser && ./run.sh
 
-# 想直接看内核子模块实操（编译零警告；加载需 root，但产物信息可验证）
+# 想直接看内核子模块实操（编译零警告；产物信息可验证。本机 Secure Boot 会拒绝未签名模块，
+# 所以加载不了 —— 原因与 MOK 签名解法见 labs/06 的 8.4/8.5）
 cd labs/06-kernel-module-netfilter && make && /sbin/modinfo netlab.ko
 # 注意 /sbin 可能不在你的 PATH 里（本机就是），所以这里写了绝对路径
 ```
@@ -98,7 +99,7 @@ cd labs/06-kernel-module-netfilter && make && /sbin/modinfo netlab.ko
 | [03-netlink-rtnetlink](labs/03-netlink-rtnetlink/) | 手写 rtnetlink dump 链路/地址/路由 | ✅ 可跑 | `net/core/rtnetlink.c` |
 | [04-raw-socket-arp](labs/04-raw-socket-arp/) | AF_PACKET 原始帧、ARP 构造与解析 | ✅ 可在 `unshare -Urn` 内跑 | `net/packet/af_packet.c`、`net/ipv4/arp.c` |
 | [05-tun-tap-userspace-stack](labs/05-tun-tap-userspace-stack/) | TUN 设备 + 用户态最小协议栈（能 ping 通） | ⚠️ 需 root + `/dev/net/tun` | `drivers/net/tun.c` |
-| [06-kernel-module-netfilter](labs/06-kernel-module-netfilter/) | **内核模块**：netfilter hook + per-CPU 统计 + procfs | ⚠️ 编译✅ / 加载需 root | `net/netfilter/core.c` |
+| [06-kernel-module-netfilter](labs/06-kernel-module-netfilter/) | **内核模块**：netfilter hook + per-CPU 统计 + procfs | ⚠️ 编译✅ / 加载需 root **且允许未签名模块**（本机 Secure Boot 拒绝，需 MOK 签名） | `net/netfilter/core.c` |
 | [07-http-parser](labs/07-http-parser/) | **HTTP/1.1 增量解析器** + epoll 教学服务器 | ✅ 可跑 | `net/ipv4/tcp.c`（`tcp_recvmsg`） |
 | [08-ebpf-xdp](labs/08-ebpf-xdp/) | eBPF/XDP：手写指令 / libbpf 示例 | ⚠️ 编译✅ / 加载需 root | `net/core/filter.c`、`kernel/bpf/` |
 | [09-observability](labs/09-observability/) | 观测工具箱：`ss`/`/proc/net`/sock_diag/丢包定位 | ✅ 大部分可跑 | `net/ipv4/inet_diag.c` |

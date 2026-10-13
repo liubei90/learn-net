@@ -45,6 +45,9 @@ __pycache__/
 # 仓库只保留源码、文档与 Makefile；需要日志就自己跑一遍 run.sh。
 labs/*/.out/
 
+# mok-sign.sh 签名前留下的未签名备份
+*.unsigned.bak
+
 # 按 docs/00 的读码方法可能在本仓库里生成的索引文件
 cscope.out
 cscope.in.out
