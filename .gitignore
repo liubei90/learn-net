@@ -40,4 +40,15 @@ __pycache__/
 *~
 .DS_Store
 
-# 说明：labs/*/.out/*.log 是**真实运行日志**，属于教程证据，故意入库。
+# ── 实验运行日志（是本机运行产物，**不入库**）─────────────────────────
+# 各 lab 的 run.sh 会在自己目录下生成 .out/，里面是本机真实运行输出。
+# 仓库只保留源码、文档与 Makefile；需要日志就自己跑一遍 run.sh。
+labs/*/.out/
+
+# 按 docs/00 的读码方法可能在本仓库里生成的索引文件
+cscope.out
+cscope.in.out
+cscope.po.out
+tags
+.cscope/
+compile_commands.json

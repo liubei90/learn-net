@@ -501,7 +501,7 @@ FRAG6: inuse 0 memory 0
 ```bash
 cd labs/02-tcp-state-machine
 make clean                  # 删除 backlog_probe / timewait_demo
-rm -rf .out                 # 运行日志目录（仅运行产物）
+rm -rf .out                 # 运行日志目录（仅本机运行产物，不随仓库提供）
 pkill -f backlog_probe      # 仅在 run.sh 被强杀时手动清理
 pkill -f timewait_demo
 ```
